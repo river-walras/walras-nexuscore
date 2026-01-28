@@ -1,8 +1,13 @@
-from setuptools import setup, Extension
+from setuptools import setup, Distribution
 from setuptools.command.build_py import build_py as _build_py
-from setuptools.command.build_ext import build_ext as _build_ext
 import subprocess
 import sys
+
+
+class BinaryDistribution(Distribution):
+    """Force setuptools to treat this as a platform-specific (platlib) package."""
+    def has_ext_modules(self):
+        return True
 
 
 class BuildPyCommand(_build_py):
@@ -12,22 +17,9 @@ class BuildPyCommand(_build_py):
         super().run()
 
 
-class NoopBuildExt(_build_ext):
-    """Skip build_ext since extensions are already compiled by nexuscore_build.py."""
-    def build_extensions(self):
-        pass
-
-
-# Declare a sentinel ext_module so setuptools marks the wheel as platlib
-# (platform-specific). The actual compilation is handled by nexuscore_build.py
-# via the BuildPyCommand above; NoopBuildExt ensures setuptools doesn't try to
-# compile this dummy entry itself.
 setup(
-    ext_modules=[
-        Extension("nexuscore._sentinel", sources=[]),
-    ],
+    distclass=BinaryDistribution,
     cmdclass={
         'build_py': BuildPyCommand,
-        'build_ext': NoopBuildExt,
     },
 )

@@ -19,6 +19,7 @@ extension-module = [
 ]
 ffi = ["cbindgen", "nautilus-core/ffi"]
 python = ["nautilus-core/python", "pyo3", "pyo3-stub-gen"]
+defi = []
 stubs = ["rstest"]
 high-precision = []
 

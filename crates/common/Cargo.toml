@@ -27,6 +27,9 @@ python = [
   "pyo3-stub-gen",
   "live",
 ]
+capnp = []
+defi = []
+indicators = []
 live = ["tokio"]
 tracing-bridge = ["tracing", "tracing-subscriber"]
 
