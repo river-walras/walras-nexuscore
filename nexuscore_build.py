@@ -32,9 +32,11 @@ if IS_MACOS and IS_ARM64:
     os.environ["LDFLAGS"] = f"{os.environ.get('LDFLAGS', '')} -arch arm64 -w"
 
 if IS_LINUX:
-    os.environ.setdefault("CC", "clang")
-    os.environ.setdefault("CXX", "clang++")
-    os.environ["LDSHARED"] = "clang -shared"
+    # Prefer clang if available; fall back to system default (gcc) on manylinux.
+    if shutil.which("clang") and shutil.which("clang++"):
+        os.environ.setdefault("CC", "clang")
+        os.environ.setdefault("CXX", "clang++")
+        os.environ["LDSHARED"] = "clang -shared"
 
 if IS_WINDOWS:
     RUST_LIB_PFX = ""
@@ -80,7 +82,11 @@ def _build_rust_libs():
         "--features", "ffi,python",
     ]
     print(" ".join(cmd_args))
-    subprocess.run(cmd_args, check=True)
+    pyo3_env = os.environ.copy()
+    # Avoid linking libpython when building Rust static libs; the final
+    # Python extension will resolve symbols at link/load time.
+    pyo3_env.setdefault("PYO3_NO_PYTHON", "1")
+    subprocess.run(cmd_args, check=True, env=pyo3_env)
 
     # Build PyO3 cdylib
     pyo3_cmd = [
