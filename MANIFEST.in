@@ -1,4 +1,4 @@
-include build.py
+include nexuscore_build.py
 include Cargo.toml
 include Cargo.lock
 include rust-toolchain.toml
