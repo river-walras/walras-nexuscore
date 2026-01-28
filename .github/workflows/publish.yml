@@ -9,13 +9,64 @@ permissions:
   contents: read
 
 jobs:
-  build:
-    name: Build (${{ matrix.os }} / py${{ matrix.python-version }})
-    runs-on: ${{ matrix.os }}
+  build-linux:
+    name: Build Linux (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    container: quay.io/pypa/manylinux_2_28_x86_64
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-14]
+        python-version: ["3.11", "3.12", "3.13"]
+        include:
+          - python-version: "3.11"
+            python-bin: /opt/python/cp311-cp311/bin/python
+          - python-version: "3.12"
+            python-bin: /opt/python/cp312-cp312/bin/python
+          - python-version: "3.13"
+            python-bin: /opt/python/cp313-cp313/bin/python
+    env:
+      RUSTUP_TOOLCHAIN: "1.93.0"
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.93.0
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Install build deps
+        run: |
+          yum install -y nasm perl-IPC-Cmd
+          ${{ matrix.python-bin }} -m pip install --upgrade pip
+          ${{ matrix.python-bin }} -m pip install uv auditwheel
+
+      - name: Build wheel
+        env:
+          PYO3_PYTHON: ${{ matrix.python-bin }}
+        run: ${{ matrix.python-bin }} -m uv build --wheel --python ${{ matrix.python-bin }} --out-dir dist
+
+      - name: Repair wheel
+        run: |
+          mkdir -p dist/repaired
+          for whl in dist/*linux_x86_64.whl; do
+            auditwheel repair --plat manylinux_2_28_x86_64 -w dist/repaired "$whl"
+          done
+          rm -f dist/*linux_x86_64.whl
+          mv dist/repaired/*.whl dist/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-linux-py${{ matrix.python-version }}
+          path: dist/*
+
+  build-macos:
+    name: Build macOS (py${{ matrix.python-version }})
+    runs-on: macos-14
+    strategy:
+      fail-fast: false
+      matrix:
         python-version: ["3.11", "3.12", "3.13"]
     env:
       RUSTUP_TOOLCHAIN: "1.93.0"
@@ -38,47 +89,50 @@ jobs:
         with:
           toolchain: "1.93.0"
 
-      - name: Install build deps (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y nasm perl
-
       - name: Install uv
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install uv
-
-      - name: Install auditwheel (Linux)
-        if: runner.os == 'Linux'
-        run: python -m pip install auditwheel
+        run: python -m pip install --upgrade pip uv
 
       - name: Build wheel
         run: uv build --wheel --out-dir dist
 
-      - name: Repair Linux wheels
-        if: runner.os == 'Linux'
-        run: |
-          mkdir -p dist/repaired
-          for whl in dist/*linux_x86_64.whl; do
-            auditwheel repair --plat manylinux_2_28_x86_64 -w dist/repaired "$whl"
-          done
-          rm -f dist/*linux_x86_64.whl
-          mv dist/repaired/*.whl dist/
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-macos-py${{ matrix.python-version }}
+          path: dist/*
 
-      - name: Build sdist (once)
-        if: runner.os == 'Linux' && matrix.python-version == '3.11'
+  build-sdist:
+    name: Build sdist
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        run: python -m pip install --upgrade pip uv
+
+      - name: Build sdist
         run: uv build --sdist --out-dir dist
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: dist-${{ matrix.os }}-py${{ matrix.python-version }}
+          name: dist-sdist
           path: dist/*
 
   publish:
     name: Publish to PyPI
-    needs: build
+    needs: [build-linux, build-macos, build-sdist]
     runs-on: ubuntu-latest
     permissions:
       contents: read
