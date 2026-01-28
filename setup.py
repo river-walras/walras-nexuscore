@@ -1,26 +1,33 @@
-from setuptools import setup
+from setuptools import setup, Extension
 from setuptools.command.build_py import build_py as _build_py
-from wheel.bdist_wheel import bdist_wheel as _bdist_wheel
+from setuptools.command.build_ext import build_ext as _build_ext
 import subprocess
 import sys
+
 
 class BuildPyCommand(_build_py):
     """Custom build command that runs nexuscore_build.py first."""
     def run(self):
-        # Run the custom nexuscore_build.py
         subprocess.check_call([sys.executable, 'nexuscore_build.py'])
-        # Then run the normal build
         super().run()
 
-class BDistWheelCommand(_bdist_wheel):
-    """Mark wheel as non-pure (platform-specific) since we ship compiled extensions."""
-    def finalize_options(self):
-        super().finalize_options()
-        self.root_is_pure = False
 
+class NoopBuildExt(_build_ext):
+    """Skip build_ext since extensions are already compiled by nexuscore_build.py."""
+    def build_extensions(self):
+        pass
+
+
+# Declare a sentinel ext_module so setuptools marks the wheel as platlib
+# (platform-specific). The actual compilation is handled by nexuscore_build.py
+# via the BuildPyCommand above; NoopBuildExt ensures setuptools doesn't try to
+# compile this dummy entry itself.
 setup(
+    ext_modules=[
+        Extension("nexuscore._sentinel", sources=[]),
+    ],
     cmdclass={
         'build_py': BuildPyCommand,
-        'bdist_wheel': BDistWheelCommand,
+        'build_ext': NoopBuildExt,
     },
 )
