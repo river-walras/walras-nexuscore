@@ -22,6 +22,8 @@ jobs:
       CIBW_ARCHS_LINUX: "x86_64"
       CIBW_ARCHS_MACOS: "x86_64 arm64"
       RUSTUP_TOOLCHAIN: "1.93.0"
+      CIBW_BEFORE_ALL_LINUX: "curl -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.93.0 && source $HOME/.cargo/env"
+      CIBW_ENVIRONMENT: "PATH=$PATH:$HOME/.cargo/bin RUSTUP_TOOLCHAIN=1.93.0"
     steps:
       - name: Check out source
         uses: actions/checkout@v4
