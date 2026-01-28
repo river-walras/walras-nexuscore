@@ -79,7 +79,7 @@ def _build_rust_libs():
         "-p", "nautilus-model",
         *build_options,
         "--no-default-features",
-        "--features", "ffi",
+        "--features", "ffi,python",
     ]
     print(" ".join(cmd_args))
     subprocess.run(cmd_args, check=True)
