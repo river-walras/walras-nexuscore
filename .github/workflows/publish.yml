@@ -23,7 +23,7 @@ jobs:
       RUSTUP_TOOLCHAIN: "1.93.0"
       CIBW_BUILD_VERBOSITY: "1"
       CIBW_BEFORE_ALL_LINUX: "yum -y install nasm perl || true && curl -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.93.0 && source $HOME/.cargo/env"
-      CIBW_ENVIRONMENT: "PATH=$PATH:$HOME/.cargo/bin RUSTUP_TOOLCHAIN=1.93.0 RUST_BACKTRACE=1 CARGO_TERM_VERBOSE=true"
+      CIBW_ENVIRONMENT: "PATH=$PATH:$HOME/.cargo/bin RUSTUP_TOOLCHAIN=1.93.0 RUST_BACKTRACE=1 CARGO_TERM_VERBOSE=true PYO3_PYTHON=$PYTHON"
     steps:
       - name: Harden runner
         uses: step-security/harden-runner@v2

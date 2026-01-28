@@ -83,9 +83,7 @@ def _build_rust_libs():
     ]
     print(" ".join(cmd_args))
     pyo3_env = os.environ.copy()
-    # Avoid linking libpython when building Rust static libs; the final
-    # Python extension will resolve symbols at link/load time.
-    pyo3_env.setdefault("PYO3_NO_PYTHON", "1")
+    pyo3_env.setdefault("PYO3_PYTHON", sys.executable)
     subprocess.run(cmd_args, check=True, env=pyo3_env)
 
     # Build PyO3 cdylib
@@ -97,6 +95,7 @@ def _build_rust_libs():
     ]
     print(" ".join(pyo3_cmd))
     pyo3_env = os.environ.copy()
+    pyo3_env.setdefault("PYO3_PYTHON", sys.executable)
     if IS_MACOS:
         extra = "-C link-arg=-undefined -C link-arg=dynamic_lookup"
         pyo3_env["RUSTFLAGS"] = f"{pyo3_env.get('RUSTFLAGS', '')} {extra}".strip()
