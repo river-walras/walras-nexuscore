@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=80", "cython==3.2.4", "numpy>=1.26.4"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "walras-nexuscore"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = ["numpy>=1.26.4"]
+
+[tool.setuptools]
+packages = ["nexuscore", "nexuscore.core", "nexuscore.core.includes", "nexuscore.core.rust", "nexuscore.model", "nexuscore.common", "nexuscore.serialization"]
+
+[tool.setuptools.package-data]
+"nexuscore" = ["**/*.pxd", "**/*.pyx", "**/*.pyi", "**/*.h"]
+
+[dependency-groups]
+dev = ["pytest>=8"]

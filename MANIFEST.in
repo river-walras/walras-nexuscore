@@ -1,0 +1,5 @@
+include build.py
+include Cargo.toml
+include Cargo.lock
+include rust-toolchain.toml
+recursive-include crates *
