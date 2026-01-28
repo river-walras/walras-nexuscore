@@ -79,12 +79,10 @@ def _build_rust_libs():
         "-p", "nautilus-model",
         *build_options,
         "--no-default-features",
-        "--features", "ffi,python",
+        "--features", "ffi",
     ]
     print(" ".join(cmd_args))
-    pyo3_env = os.environ.copy()
-    pyo3_env.setdefault("PYO3_PYTHON", sys.executable)
-    subprocess.run(cmd_args, check=True, env=pyo3_env)
+    subprocess.run(cmd_args, check=True)
 
     # Build PyO3 cdylib
     pyo3_cmd = [
