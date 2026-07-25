@@ -4,9 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nexuscore-lib"
-version = "0.3.0"
+version = "0.4.0"
 requires-python = ">=3.11"
-dependencies = []
+# Imported lazily by `nexuscore.core.datetime`, only for datetime strings that
+# are not valid ISO 8601. The same parser pandas defers to; ~3.5 MB resident.
+dependencies = ["python-dateutil>=2.8.2"]
 readme = { file = "README.md", content-type = "text/markdown" }
 
 [tool.setuptools]
@@ -21,5 +23,7 @@ include-package-data = false
 [dependency-groups]
 dev = [
     "cython>=3.2.8",
+    "pandas>=3.0.5",
     "pytest>=8",
+    "setuptools>=83.0.0",
 ]

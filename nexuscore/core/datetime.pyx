@@ -20,13 +20,7 @@ Functions include awareness/tz checks and conversions, as well as ISO 8601 (RFC 
 """
 
 import datetime as dt
-
-try:
-    import pandas as pd
-    from pandas.api.types import is_datetime64_ns_dtype
-except Exception:  # pragma: no cover
-    pd = None
-    is_datetime64_ns_dtype = None
+import re
 
 cimport cpython.datetime
 from cpython.datetime cimport datetime
@@ -39,6 +33,11 @@ from nexuscore.core.correctness cimport Condition
 # UNIX epoch is the UTC time at 00:00:00 on 1/1/1970
 # https://en.wikipedia.org/wiki/Unix_time
 cdef datetime UNIX_EPOCH = dt.datetime(1970, 1, 1, tzinfo=dt.timezone.utc)
+
+# Sub-second digits of an ISO 8601 time component. `datetime.fromisoformat`
+# truncates these to microseconds, so they are stripped before parsing and
+# re-applied afterwards to keep nanosecond resolution.
+cdef object _ISO_FRACTION_RE = re.compile(r"(?<=\d{2}:\d{2}:\d{2})\.(\d+)")
 
 
 cpdef uint64_t secs_to_nanos(double secs):
@@ -85,9 +84,70 @@ cdef inline datetime _as_utc_datetime(datetime dt_obj):
     return dt_obj
 
 
-cdef inline uint64_t _py_dt_to_unix_nanos(datetime dt_obj):
-    cdef datetime utc_dt = _as_utc_datetime(dt_obj)
-    return <uint64_t>int(utc_dt.timestamp() * 1_000_000_000)
+cdef inline object _dt_to_nanos_int(datetime dt_obj):
+    # Exact UTC nanoseconds since the epoch, as a Python int (may be negative).
+    # Integer arithmetic on the timedelta rather than `timestamp() * 1e9`: a
+    # float64 holds only 2**53 integers exactly, so nanosecond magnitudes
+    # (~1.7e18) lose their low digits.
+    cdef object delta = _as_utc_datetime(dt_obj) - UNIX_EPOCH
+    return (
+        (delta.days * 86_400 + delta.seconds) * 1_000_000_000
+        + delta.microseconds * 1_000
+    )
+
+
+cdef inline object _datetime_like_to_nanos_int(datetime dt_obj):
+    # `pandas.Timestamp` subclasses `datetime` and exposes `.value` as UTC
+    # nanoseconds since the epoch. Reading it duck-typed preserves nanosecond
+    # inputs exactly without importing pandas.
+    cdef object value = getattr(dt_obj, "value", None)
+    if type(value) is int:
+        return value
+    return _dt_to_nanos_int(dt_obj)
+
+
+cdef inline object _date_to_nanos_int(object date_obj):
+    return _dt_to_nanos_int(
+        dt.datetime(
+            date_obj.year,
+            date_obj.month,
+            date_obj.day,
+            tzinfo=dt.timezone.utc,
+        )
+    )
+
+
+cdef object _parse_non_iso(str value):
+    # Fall back to dateutil (the date parser pandas itself defers to) for the
+    # formats ISO 8601 does not cover. Imported lazily: ISO 8601 handles the hot
+    # paths, and dateutil costs ~3.5 MB resident that most processes never need.
+    try:
+        from dateutil.parser import parse as dateutil_parse
+    except ImportError:
+        raise ValueError(f"Invalid datetime string: {value!r}") from None
+
+    try:
+        return dateutil_parse(value)
+    except (ValueError, OverflowError, TypeError):
+        raise ValueError(f"Invalid datetime string: {value!r}") from None
+
+
+cdef inline object _str_to_nanos_int(str value):
+    cdef object match = _ISO_FRACTION_RE.search(value)
+    cdef str digits = ""
+    cdef str trimmed = value
+    if match is not None:
+        digits = match.group(1)
+        trimmed = value[:match.start()] + value[match.end():]
+
+    cdef datetime parsed
+    try:
+        parsed = dt.datetime.fromisoformat(trimmed)
+    except ValueError:
+        # dateutil resolves to microseconds; no fraction to re-apply.
+        return _dt_to_nanos_int(_parse_non_iso(value))
+
+    return _dt_to_nanos_int(parsed) + int(digits.ljust(9, "0")[:9])
 
 
 cpdef unix_nanos_to_dt(uint64_t nanos):
@@ -113,8 +173,9 @@ cpdef dt_to_unix_nanos(dt_value):
 
     Parameters
     ----------
-    dt_value : datetime | str | int
-        The datetime to convert.
+    dt_value : datetime | date | str | int | float
+        The datetime to convert. Integers and floats are interpreted as
+        nanoseconds since the epoch.
 
     Returns
     -------
@@ -122,36 +183,25 @@ cpdef dt_to_unix_nanos(dt_value):
 
     Warnings
     --------
-    This function supports Python ``datetime`` objects; nanosecond precision
-    is preserved when a ``pandas.Timestamp`` is provided and pandas is available.
+    Nanosecond precision is preserved for ``pandas.Timestamp`` inputs and for
+    ISO 8601 strings carrying more than six fractional digits. Plain Python
+    ``datetime`` objects only carry microseconds.
 
     """
     Condition.not_none(dt_value, "dt")
 
-    if pd is not None:
-        if isinstance(dt_value, pd.Timestamp):
-            return <uint64_t>dt_value.value
-        try:
-            ts = pd.Timestamp(dt_value)
-        except Exception:
-            ts = None
-        if ts is not None:
-            return <uint64_t>ts.value
-
+    # `datetime` before `date`: the former subclasses the latter.
     if isinstance(dt_value, datetime):
-        return _py_dt_to_unix_nanos(dt_value)
+        return <uint64_t>_datetime_like_to_nanos_int(dt_value)
+
+    if isinstance(dt_value, dt.date):
+        return <uint64_t>_date_to_nanos_int(dt_value)
 
     if isinstance(dt_value, (int, float)):
-        if abs(dt_value) > 1_000_000_000_000:
-            return <uint64_t>int(dt_value)
-        return <uint64_t>int(dt_value * 1_000_000_000)
+        return <uint64_t>int(dt_value)
 
     if isinstance(dt_value, str):
-        try:
-            parsed = dt.datetime.fromisoformat(dt_value)
-        except ValueError as exc:
-            raise ValueError(f"Invalid datetime string: {dt_value!r}") from exc
-        return _py_dt_to_unix_nanos(parsed)
+        return <uint64_t>_str_to_nanos_int(dt_value)
 
     raise TypeError(f"Unsupported datetime type: {type(dt_value)}")
 
@@ -311,13 +361,18 @@ cpdef bint is_tz_aware(time_object):
     """
     Condition.not_none(time_object, "time_object")
 
+    # `pandas.Timestamp` subclasses `datetime`, so it lands here too.
     if isinstance(time_object, datetime):
         return datetime_tzinfo(time_object) is not None
-    if pd is not None:
-        if isinstance(time_object, pd.Timestamp):
-            return time_object.tzinfo is not None
-        if isinstance(time_object, pd.DataFrame):
-            return hasattr(time_object.index, "tz") or time_object.index.tz is not None
+
+    # pandas Series/DataFrame duck-type, checked without importing pandas.
+    # Keyed on `tz_localize` rather than `index`: str and list also carry an
+    # `index` attribute (the method), which would swallow them into this branch.
+    cdef object index
+    if hasattr(time_object, "tz_localize"):
+        index = time_object.index
+        return hasattr(index, "tz") or index.tz is not None
+
     raise ValueError(f"Cannot check timezone awareness of a {type(time_object)} object")
 
 
@@ -378,9 +433,6 @@ cpdef object as_utc_index(data):
     """
     Condition.not_none(data, "data")
 
-    if pd is None:
-        raise ImportError("pandas is required for as_utc_index")
-
     if data.empty:
         return data
 
@@ -390,8 +442,10 @@ cpdef object as_utc_index(data):
     elif data.index.tzinfo != dt.timezone.utc:
         data = data.tz_convert(None).tz_localize(dt.timezone.utc)
 
-    # Check if the index is in nanosecond resolution, convert if not
-    if not is_datetime64_ns_dtype(data.index.dtype):
+    # Check if the index is in nanosecond resolution, convert if not.
+    # Equivalent to `pandas.api.types.is_datetime64_ns_dtype` without importing
+    # pandas: that predicate matches datetime64[ns] and datetime64[ns, <tz>].
+    if not str(data.index.dtype).startswith("datetime64[ns"):
         data.index = data.index.astype("datetime64[ns, UTC]")
 
     return data
@@ -415,20 +469,24 @@ cpdef datetime time_object_to_dt(time_object):
     if time_object is None:
         return None
 
-    if pd is not None and isinstance(time_object, pd.Timestamp):
-        return as_utc_timestamp(time_object)
-
+    # `pandas.Timestamp` subclasses `datetime`, so it lands here too.
     if isinstance(time_object, datetime):
         return as_utc_timestamp(time_object)
 
+    if isinstance(time_object, dt.date):
+        return dt.datetime(
+            time_object.year,
+            time_object.month,
+            time_object.day,
+            tzinfo=dt.timezone.utc,
+        )
+
+    # Unlike `dt_to_unix_nanos`, a bare number here means seconds.
     if isinstance(time_object, (int, float)):
         return dt.datetime.fromtimestamp(time_object, tz=dt.timezone.utc)
 
     if isinstance(time_object, str):
         return as_utc_timestamp(dt.datetime.fromisoformat(time_object))
-
-    if pd is not None:
-        return as_utc_timestamp(pd.Timestamp(time_object))
 
     raise TypeError(f"Unsupported time object type: {type(time_object)}")
 
@@ -518,10 +576,12 @@ def ensure_pydatetime_utc(timestamp) -> dt.datetime | None:
     if timestamp is None:
         return None
 
-    if pd is not None and isinstance(timestamp, pd.Timestamp):
-        # ``to_pydatetime`` emits a warning when nanoseconds are present because the
-        # Python ``datetime`` type cannot store them.  We truncate to the closest
-        # microsecond to silence the warning while keeping deterministic behaviour.
+    # ``pandas.Timestamp`` duck-type, checked before the ``datetime`` branch it
+    # would otherwise match: it carries nanoseconds a ``datetime`` cannot hold.
+    # ``to_pydatetime`` emits a warning when nanoseconds are present, so we
+    # truncate to the closest microsecond to silence it while keeping
+    # deterministic behaviour.
+    if hasattr(timestamp, "to_pydatetime"):
         if timestamp.nanosecond:
             timestamp = timestamp.floor("us")
         return timestamp.tz_convert("UTC").to_pydatetime()
