@@ -1,3 +1,9 @@
 # Sources needed to build the extensions from an sdist (Cython -> C -> .so).
 recursive-include nexuscore *.pyx *.pxd *.pyi
 include setup.py
+
+# common.secp256k1 compiles vendored libsecp256k1, so its C sources must ship in
+# the sdist or building from it fails.
+recursive-include vendor/secp256k1 *.c *.h
+include vendor/secp256k1/LICENSE
+include vendor/secp256k1/README.md

@@ -1,0 +1,6 @@
+from __future__ import annotations
+
+
+class SigningKey:
+    def __init__(self, key: bytes) -> None: ...
+    def sign_recoverable(self, digest: bytes) -> bytes: ...
