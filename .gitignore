@@ -27,6 +27,9 @@ wheelhouse/
 
 # Cython
 *.c
+# ...but vendor/ holds libsecp256k1's real C sources, not Cython output -- the rule
+# above would silently drop them and break the secp256k1 extension.
+!vendor/**/*.c
 
 # macOS
 .DS_Store
